@@ -1,7 +1,11 @@
 (function () {
-  const STORAGE_KEY = 'bbc_redeemed_ids';
-  const redeemed = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
-  const redeemedAt = JSON.parse(localStorage.getItem(STORAGE_KEY + '_dates') || '{}');
+  // ====== SUPABASE SETTINGS: paste yours here ======
+  const SUPABASE_URL = 'https://rmtvaxyvvsrxnydhkgie.supabase.co/rest/v1/';
+  const SUPABASE_KEY = 'sb_publishable_9HktNtzmNDVTWFZ6wpSZ-A_v3mSmj_D';
+  // =================================================
+
+  const redeemed = new Set();
+  const redeemedAt = {};
 
   const inner = document.getElementById('inner');
   const counterEl = document.getElementById('counter');
@@ -13,11 +17,42 @@
   let current = 0;
   const totalPages = COUPONS.length + 2; // cover + coupons + closing
 
-  function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...redeemed]));
-    localStorage.setItem(STORAGE_KEY + '_dates', JSON.stringify(redeemedAt));
+  // ---------- Supabase ----------
+  let db = null;
+  if (window.supabase && SUPABASE_URL.startsWith('http')) {
+    db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  } else {
+    console.warn('Supabase not configured: redemptions will not be saved.');
   }
 
+  function markRedeemed(id, iso) {
+    redeemed.add(id);
+    redeemedAt[id] = iso || new Date().toISOString();
+  }
+
+  async function loadRedemptions() {
+    if (!db) return;
+    const { data, error } = await db.from('redemptions').select('coupon_id, redeemed_at');
+    if (error) { console.error(error); return; }
+    data.forEach(r => markRedeemed(r.coupon_id, r.redeemed_at));
+    renderPage();
+  }
+
+  function subscribeLive() {
+    if (!db) return;
+    db.channel('redemptions-live')
+      .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'redemptions' },
+          payload => {
+            const id = payload.new.coupon_id;
+            if (redeemed.has(id)) return;
+            markRedeemed(id, payload.new.redeemed_at);
+            renderPage();
+          })
+      .subscribe();
+  }
+
+  // ---------- Helpers ----------
   function redeemedCount() { return redeemed.size; }
 
   function fmtDate(iso) {
@@ -33,6 +68,7 @@
     return e;
   }
 
+  // ---------- Rendering ----------
   function renderCover() {
     inner.innerHTML = '';
     inner.parentElement.className = 'page-frame type-cover';
@@ -116,15 +152,29 @@
     showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2000);
   }
 
-  function redeemCoupon(id) {
+  // ---------- Redeeming ----------
+  async function redeemCoupon(id) {
     if (redeemed.has(id)) return; // already locked
-    redeemed.add(id);
-    redeemedAt[id] = new Date().toISOString();
-    saveState();
+
+    // Show it instantly, then save
+    markRedeemed(id);
     renderPage();
+
+    if (!db) { showToast('Redeemed ♡ (not saved online)'); return; }
+
+    const { error } = await db.from('redemptions').insert({ coupon_id: id });
+    if (error && error.code !== '23505') { // 23505 = already redeemed elsewhere, which is fine
+      console.error(error);
+      redeemed.delete(id);
+      delete redeemedAt[id];
+      renderPage();
+      showToast('Could not save, please try again');
+      return;
+    }
     showToast('Redeemed ♡ — locked in');
   }
 
+  // ---------- Navigation ----------
   prevBtn.addEventListener('click', () => { if (current > 0) { current--; renderPage(); } });
   nextBtn.addEventListener('click', () => { if (current < totalPages - 1) { current++; renderPage(); } });
   document.addEventListener('keydown', (e) => {
@@ -133,4 +183,6 @@
   });
 
   renderPage();
+  loadRedemptions();
+  subscribeLive();
 })();
