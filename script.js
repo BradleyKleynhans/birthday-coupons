@@ -1,6 +1,6 @@
 (function () {
   // ====== SUPABASE SETTINGS: paste yours here ======
-  const SUPABASE_URL = 'https://rmtvaxyvvsrxnydhkgie.supabase.co/rest/v1/';
+  const SUPABASE_URL = 'https://rmtvaxyvvsrxnydhkgie.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_9HktNtzmNDVTWFZ6wpSZ-A_v3mSmj_D';
   // =================================================
 
